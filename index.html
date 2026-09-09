@@ -518,6 +518,14 @@
   .exercise-meta{margin-top:12px;font-size:9.5px;color:#BFD0C8;}
   @media(max-width:430px){.exercise-grid,.exercise-columns{grid-template-columns:1fr;}}
 
+
+  /* TrainUp monetisation */
+  .creator-credit{font-size:9px;font-weight:700;letter-spacing:.35px;color:var(--ink-soft);opacity:.72;margin-top:2px;text-transform:none;}
+  .ad-slot{background:var(--surface);border:1px dashed var(--line);border-radius:var(--radius-m);padding:10px;margin:12px 0 18px;text-align:center;overflow:hidden;}
+  .ad-slot-label{font-size:9px;font-weight:800;letter-spacing:.6px;color:var(--ink-soft);text-transform:uppercase;margin-bottom:5px;}
+  .ad-slot .adsbygoogle{display:block;min-height:90px;}
+  .ad-slot.is-placeholder{min-height:72px;display:flex;flex-direction:column;justify-content:center;align-items:center;}
+  .ad-slot.is-placeholder small{font-size:10px;color:var(--ink-soft);line-height:1.35;}
 </style>
 </head>
 <body>
@@ -531,6 +539,7 @@
       <div>
         <div class="brandname">Train<span>Up</span></div>
         <div class="brand-tag">Monte de niveau</div>
+        <div class="creator-credit">Created by Simon Desailly</div>
       </div>
     </div>
     <button class="topbar-sub" id="topbarAction" title="Compte" type="button"></button>
@@ -539,6 +548,10 @@
   <div class="screens" id="screens">
 
     <section class="screen active" id="screen-home">
+      <div class="ad-slot" id="ad-slot-home" aria-label="Publicité">
+        <div class="ad-slot-label">Publicité</div>
+        <div class="ad-content"></div>
+      </div>
       <h1 class="hero">Ton entraînement. Tes objectifs.<br><em>Ton évolution.</em></h1>
       <p class="desc">Train Up crée des programmes selon tes muscles, ton matériel (haltères, élastiques, machines…) et ton niveau — puis te montre comment faire chaque exo.</p>
 
@@ -623,7 +636,7 @@
 
     <section class="screen" id="screen-salle">
       <h1 class="hero" style="font-size:22px;">Une salle autour de chez moi</h1>
-      <p class="desc">Salles de musculation et spots de street workout à proximité.</p>
+      <p class="desc">Salles de musculation et spots de street workout à proximité.</p><p class="hint" style="margin-top:-4px;">Train Up utilise ta localisation uniquement pour centrer les recherches de salles et de spots autour de toi.</p>
       <div class="map-wrap" id="mapWrap"></div>
       <div class="section-title">Résultats à proximité</div>
       <div id="gymList"></div>
@@ -754,6 +767,46 @@
 
 <input type="file" id="photoInput" accept="image/*" style="display:none">
 
+<script>
+/* ===== TrainUp Ads configuration =====
+   To activate Google AdSense, replace the two placeholders below with your
+   approved publisher/client and ad slot IDs, then keep the AdSense account
+   compliant with its policies and any consent requirements that apply.
+   Until configured, TrainUp shows a non-monetised placeholder.
+*/
+const TRAINUP_ADS = {
+  enabled: false,
+  client: "ca-pub-XXXXXXXXXXXXXXXX",
+  slot: "XXXXXXXXXX",
+  format: "auto",
+  fullWidthResponsive: true
+};
+
+function loadTrainUpAds(){
+  const slots = document.querySelectorAll('.ad-slot');
+  if(!TRAINUP_ADS.enabled || !/^ca-pub-\d+$/.test(TRAINUP_ADS.client) || !/^\d+$/.test(TRAINUP_ADS.slot)){
+    slots.forEach(slot=>{
+      const content=slot.querySelector('.ad-content');
+      if(content){
+        slot.classList.add('is-placeholder');
+        content.innerHTML='<small>Emplacement publicitaire — à activer avec un compte publicitaire validé</small>';
+      }
+    });
+    return;
+  }
+  const script=document.createElement('script');
+  script.async=true;
+  script.src='https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client='+encodeURIComponent(TRAINUP_ADS.client);
+  script.crossOrigin='anonymous';
+  document.head.appendChild(script);
+  slots.forEach(slot=>{
+    const content=slot.querySelector('.ad-content');
+    if(!content) return;
+    content.innerHTML='<ins class="adsbygoogle" style="display:block" data-ad-client="'+TRAINUP_ADS.client+'" data-ad-slot="'+TRAINUP_ADS.slot+'" data-ad-format="'+TRAINUP_ADS.format+'" data-full-width-responsive="'+(TRAINUP_ADS.fullWidthResponsive?'true':'false')+'"></ins>';
+    try{(window.adsbygoogle=window.adsbygoogle||[]).push({});}catch(e){}
+  });
+}
+</script>
 <script>
 /* ===================== DATA ===================== */
 const MUSCLES = {
@@ -1443,29 +1496,78 @@ document.getElementById('publishBtn').addEventListener('click', ()=>{
   showScreen('home');
 });
 
-/* ===================== SALLE ===================== */
-const GYMS = [
-  {name:"Basic-Fit Centre", dist:"0,4 km", type:"Salle de musculation", x:34, y:60},
-  {name:"Street Park Workout", dist:"0,9 km", type:"Spot street workout", x:70, y:30},
-  {name:"L'Orange Bleue", dist:"1,3 km", type:"Salle de musculation", x:18, y:22},
-  {name:"City Bars", dist:"1,8 km", type:"Spot street workout", x:80, y:70}
-];
+/* ===================== SALLE / GOOGLE MAPS ===================== */
+let userLocation = null;
+let locationStatus = "Recherche de ta position…";
+
+function googleMapsSearchUrl(query){
+  const q = userLocation ? `${query} @${userLocation.lat},${userLocation.lng}` : query;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+}
+function googleMapsDirectionsUrl(destination){
+  const params = new URLSearchParams({api: '1', destination});
+  if(userLocation) params.set('origin', `${userLocation.lat},${userLocation.lng}`);
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+function requestUserLocation(showAlert=false){
+  if(!navigator.geolocation){
+    locationStatus = "La géolocalisation n'est pas disponible sur cet appareil.";
+    renderMap(); renderGymList();
+    return;
+  }
+  locationStatus = "Autorise la localisation pour trouver les salles proches.";
+  renderMap(); renderGymList();
+  navigator.geolocation.getCurrentPosition(pos=>{
+    userLocation = {lat: pos.coords.latitude, lng: pos.coords.longitude};
+    locationStatus = "Position trouvée : les recherches Google Maps seront centrées autour de toi.";
+    renderMap(); renderGymList();
+  }, err=>{
+    locationStatus = err && err.code === 1
+      ? "Localisation refusée. Tu peux quand même ouvrir Google Maps et utiliser ta position."
+      : "Position indisponible. Tu peux quand même ouvrir Google Maps.";
+    renderMap(); renderGymList();
+    if(showAlert) alert(locationStatus);
+  }, {enableHighAccuracy:true, timeout:10000, maximumAge:300000});
+}
 function renderMap(){
   const wrap = document.getElementById('mapWrap');
-  wrap.innerHTML = '';
-  wrap.appendChild(el(`<div class="pin me" style="left:50%; top:50%; transform:translate(-50%,-50%);"></div>`));
-  GYMS.forEach(g=>{
-    const pin = el(`<div class="pin" style="left:${g.x}%; top:${g.y}%;"><span>${g.type.includes('street')?'🤸':'🏋️'}</span></div>`);
-    pin.title = g.name;
-    wrap.appendChild(pin);
-  });
+  if(!wrap) return;
+  const locationText = userLocation
+    ? "📍 Ta position est utilisée pour rechercher les établissements autour de toi."
+    : "📍 Train Up a besoin de ta localisation pour centrer les recherches.";
+  wrap.innerHTML = `
+    <div style="height:100%;min-height:240px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:22px;box-sizing:border-box;background:linear-gradient(135deg,#eef3f0,#dfe8e3);border-radius:inherit;">
+      <div style="font-size:48px;margin-bottom:8px;">🗺️</div>
+      <div style="font-weight:900;font-size:18px;margin-bottom:6px;">Google Maps</div>
+      <div style="font-size:12px;color:var(--ink-soft);max-width:320px;line-height:1.45;margin-bottom:14px;">${locationText}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;">
+        <a class="btn btn-primary" href="${googleMapsSearchUrl('salles de sport')}" target="_blank" rel="noopener noreferrer">🏋️ Salles de musculation</a>
+        <a class="btn btn-ghost" href="${googleMapsSearchUrl('street workout')}" target="_blank" rel="noopener noreferrer">🤸 Street workout</a>
+      </div>
+      <button class="btn btn-ghost" id="refreshLocationBtn" style="margin-top:9px;">📍 Actualiser ma position</button>
+      <div style="font-size:10px;color:var(--ink-soft);margin-top:8px;">${locationStatus}</div>
+    </div>`;
+  const btn=document.getElementById('refreshLocationBtn');
+  if(btn) btn.addEventListener('click',()=>requestUserLocation(true));
 }
 function renderGymList(){
-  document.getElementById('gymList').innerHTML = GYMS.map(g=>`
+  const list=document.getElementById('gymList');
+  if(!list) return;
+  const gymsUrl=googleMapsSearchUrl('salles de sport');
+  const streetUrl=googleMapsSearchUrl('street workout');
+  const directionUrl=googleMapsDirectionsUrl('salle de sport');
+  list.innerHTML = `
     <div class="gym-list-item">
-      <div><div class="gym-name">${g.name}</div><div class="gym-meta">${g.type}</div></div>
-      <div class="gym-dist">${g.dist}</div>
-    </div>`).join('');
+      <div><div class="gym-name">Salles réelles autour de toi</div><div class="gym-meta">Recherche Google Maps basée sur ta localisation</div></div>
+      <a class="btn btn-sm btn-primary" href="${gymsUrl}" target="_blank" rel="noopener noreferrer">Voir</a>
+    </div>
+    <div class="gym-list-item">
+      <div><div class="gym-name">Street workout autour de toi</div><div class="gym-meta">Parcs et spots référencés sur Google Maps</div></div>
+      <a class="btn btn-sm btn-ghost" href="${streetUrl}" target="_blank" rel="noopener noreferrer">Voir</a>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px;">
+      <a class="btn btn-primary" style="flex:1;text-align:center;" href="${directionUrl}" target="_blank" rel="noopener noreferrer">🧭 Itinéraire vers une salle</a>
+    </div>`;
 }
 
 const CHANNELS = [
@@ -1787,8 +1889,13 @@ populateExerciseSelect();
 renderPickedList();
 renderMap();
 renderGymList();
+requestUserLocation(false);
 renderChannelList();
 renderProgramStatusV6();
+</script>
+
+<script>
+document.addEventListener('DOMContentLoaded', loadTrainUpAds);
 </script>
 </body>
 </html>
