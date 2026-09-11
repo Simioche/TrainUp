@@ -328,6 +328,30 @@
   .chat-input-row{display:flex; gap:8px; position:sticky; bottom:0; background:var(--bg); padding-top:8px;}
   .back-link{display:flex;align-items:center;gap:6px; font-weight:700; font-size:13px; color:var(--brand); cursor:pointer; margin-bottom:14px;}
   .empty-note{font-size:12.5px; color:var(--ink-soft); text-align:center; padding:20px 10px;}
+  .sync-banner{
+    display:flex; align-items:center; gap:8px; font-size:11.5px; font-weight:700;
+    padding:8px 12px; border-radius:100px; margin:2px 0 18px 0; width:fit-content;
+  }
+  .sync-banner.off{background:var(--brick-tint); color:var(--brick);}
+  .sync-banner.on{background:var(--brand-tint); color:var(--brand-dark);}
+  .empty-feed{
+    text-align:center; padding:34px 18px; background:var(--surface);
+    border:1.5px dashed var(--line); border-radius:var(--radius-l); margin-bottom:12px;
+  }
+  .empty-feed .ic{font-size:30px; margin-bottom:8px;}
+  .empty-feed .t{font-family:var(--font-display); font-weight:900; font-size:15px; color:var(--ink); margin-bottom:4px;}
+  .empty-feed .d{font-size:12.5px; color:var(--ink-soft); line-height:1.45;}
+  .feed-media{width:100%; border-radius:14px; margin:2px 0 10px 0; display:block; max-height:220px; object-fit:cover; background:#0000000d;}
+  .media-btn-row{display:flex; gap:8px; margin-top:8px;}
+  .media-btn{
+    flex:1; display:flex; align-items:center; justify-content:center; gap:6px;
+    padding:11px; border-radius:12px; border:1.5px solid var(--line); background:var(--surface-2);
+    color:var(--ink); font-weight:800; font-size:12.5px; cursor:pointer;
+  }
+  .media-btn.locked{color:var(--ink-soft); background:var(--surface); border-style:dashed;}
+  .media-btn.filled{border-color:var(--brand); color:var(--brand-dark); background:var(--brand-tint);}
+  .media-lock-hint{font-size:11.5px; color:var(--ink-soft); margin-top:6px; line-height:1.4;}
+  .media-lock-hint a{color:var(--brand); font-weight:700; cursor:pointer; text-decoration:underline;}
 
   /* account */
   .profile-hero{
@@ -554,11 +578,16 @@
       </div>
       <h1 class="hero">Ton entraînement. Tes objectifs.<br><em>Ton évolution.</em></h1>
       <p class="desc">Train Up crée des programmes selon tes muscles, ton matériel (haltères, élastiques, machines…) et ton niveau — puis te montre comment faire chaque exo.</p>
+      <div id="syncBanner"></div>
 
       <div class="section-title">Les muscles que tu peux travailler</div>
       <div class="muscle-grid" id="muscleGridHome"></div>
 
       <div class="section-title">Dans le fil <span class="count" id="feedCount"></span></div>
+      <div class="tabs" id="feedTabs">
+        <div class="tab on" data-feedtab="trend">🔥 Tendances</div>
+        <div class="tab" data-feedtab="friends">👥 Mes amis</div>
+      </div>
       <div id="feedList"></div>
 
       <div class="donate-box" id="donateBox">
@@ -630,6 +659,17 @@
 
       <div class="field-label">Petit mot (optionnel)</div>
       <textarea id="createNote" placeholder="Un conseil, une sensation, une consigne..."></textarea>
+
+      <div class="field-label">Ajouter un média (optionnel)</div>
+      <input type="file" id="createPhotoInput" accept="image/*" style="display:none">
+      <input type="file" id="createVideoInput" accept="video/*" style="display:none">
+      <div class="media-btn-row">
+        <button type="button" class="media-btn" id="createPhotoBtn">📷 Photo</button>
+        <button type="button" class="media-btn" id="createVideoBtn">🎬 Vidéo <span id="videoLockBadge"></span></button>
+      </div>
+      <div class="media-lock-hint" id="videoLockHint" style="display:none;">🔒 L'ajout de vidéo est réservé aux abonnés à un programme Train Up. <a id="goProgramsLink">Voir les programmes</a></div>
+      <div id="createPhotoPreview"></div>
+      <div id="createVideoPreview"></div>
 
       <button class="btn btn-primary" id="publishBtn" style="margin-top:18px;">Publier dans le fil</button>
     </section>
@@ -767,6 +807,46 @@
 
 <input type="file" id="photoInput" accept="image/*" style="display:none">
 
+<!-- ===================== FIREBASE (synchronisation réelle entre appareils) =====================
+     Ces 3 lignes chargent le kit Firebase. Elles ne font rien tant que la config
+     ci-dessous n'est pas remplie avec TES identifiants de projet (voir le tuto fourni). -->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-storage-compat.js"></script>
+<script>
+/* ===================== CONFIGURATION FIREBASE =====================
+   1. Va sur https://console.firebase.google.com → crée un projet gratuit.
+   2. Ajoute une application Web, copie la config qu'on te donne et colle-la ci-dessous
+      à la place des valeurs "COLLE_...".
+   3. Active "Authentication" → méthode "E-mail/Mot de passe".
+   4. Active "Firestore Database" (mode production) et "Storage".
+   5. Copie les règles de sécurité données dans le tuto "GUIDE-SYNCHRONISATION.md".
+   Tant que apiKey n'est pas renseignée, Train Up fonctionne uniquement en local
+   (comme avant) : les publications restent sur cet appareil et ne sont pas partagées.
+====================================================================== */
+  const firebaseConfig = {
+    apiKey: "AIzaSyCpaf19j_SOy6nhO65is8NSUbSWyntloKE",
+    authDomain: "trainup-a1f5d.firebaseapp.com",
+    projectId: "trainup-a1f5d",
+    storageBucket: "trainup-a1f5d.firebasestorage.app",
+    messagingSenderId: "251507470028",
+    appId: "1:251507470028:web:fc2c8659443d18bf971c69"
+  };
+let auth = null, db = null, storage = null;
+const firebaseReady = !!(firebaseConfig.apiKey && firebaseConfig.apiKey.indexOf("COLLE_") === -1);
+if(firebaseReady){
+  try{
+    firebase.initializeApp(firebaseConfig);
+    auth = firebase.auth();
+    db = firebase.firestore();
+    storage = firebase.storage();
+  }catch(e){
+    console.error("Firebase n'a pas pu démarrer :", e);
+  }
+}
+</script>
+
 <script>
 /* ===== TrainUp Ads configuration =====
    To activate Google AdSense, replace the two placeholders below with your
@@ -860,19 +940,13 @@ const EQUIP_LIBRARY = [
   {ic:"🟤", n:"Sandbag"},{ic:"🪜", n:"Échelle d'agilité"},{ic:"💿", n:"Disques olympiques"}
 ];
 
-const PEOPLE = [
-  {id:"lea", name:"Léa M.", init:"LM", handle:"@lea.move"},
-  {id:"karim", name:"Karim B.", init:"KB", handle:"@karim.lift"},
-  {id:"ines", name:"Inès D.", init:"ID", handle:"@ines.strong"},
-  {id:"sam", name:"Sam R.", init:"SR", handle:"@sam.fuel"}
-];
+// Liste des VRAIS membres Train Up (remplie automatiquement depuis Firebase
+// si la synchronisation est activée ; reste vide sinon).
+let REAL_USERS = [];
 
-const DEFAULT_FEED = [
-  {id:"p1", userId:"lea", user:"Léa M.", init:"LM", title:"Full body express — 30 min", muscles:["Quadriceps","Dos","Abdominaux"], likes:34, saves:8, note:"Parfait avant le boulot, ça réveille !", vis:"public", exercises:["Squat poids du corps","Tractions australiennes","Gainage (planche)"]},
-  {id:"p2", userId:"karim", user:"Karim B.", init:"KB", title:"Push day intense", muscles:["Pectoraux","Épaules","Triceps"], likes:52, saves:19, note:"Focus sur le tempo, pas la charge.", vis:"public", exercises:["Développé couché haltères","Développé militaire","Dips"]},
-  {id:"p3", userId:"ines", user:"Inès D.", init:"ID", title:"Fessiers & ischios sans matériel", muscles:["Fessiers","Ischio-jambiers"], likes:71, saves:26, note:"Idéale en voyage, aucun équipement requis.", vis:"public", exercises:["Hip thrust au sol","Nordic curl (assisté)"]},
-  {id:"p4", userId:"karim", user:"Karim B.", init:"KB", title:"Secret friends — élastiques fessiers", muscles:["Fessiers"], likes:12, saves:4, note:"Uniquement pour le cercle proche 👀", vis:"friends", exercises:["Abduction élastique (monster walk)","Kickback élastique"]}
-];
+// Aucune publication factice : le fil démarre vide, seules les vraies séances
+// publiées par de vrais membres y apparaîtront.
+const DEFAULT_FEED = [];
 
 const LS = "trainup-v2";
 let createVis = "public";
@@ -895,7 +969,8 @@ let state = {
   currentChat: null,
   account: null,
   authMode: "signup",
-  profileTab: "posts"
+  profileTab: "posts",
+  feedTab: "trend"
 };
 
 function loadState(){
@@ -903,15 +978,17 @@ function loadState(){
     const raw = localStorage.getItem(LS);
     if(!raw) return;
     const d = JSON.parse(raw);
-    if(d.account) state.account = d.account;
-    if(d.feed) state.feed = d.feed;
+    if(d.account && !firebaseReady) state.account = d.account;
+    if(d.feed && !firebaseReady) state.feed = d.feed;
     if(d.ratings) state.ratings = d.ratings;
     if(typeof d.rating==="number") state.rating = d.rating;
   }catch(e){}
 }
 function saveState(){
   localStorage.setItem(LS, JSON.stringify({
-    account: state.account, feed: state.feed, ratings: state.ratings, rating: state.rating
+    account: firebaseReady ? null : state.account,
+    feed: firebaseReady ? null : state.feed,
+    ratings: state.ratings, rating: state.rating
   }));
 }
 
@@ -976,6 +1053,7 @@ function showScreen(name){
   document.querySelectorAll('.navbtn').forEach(b=>b.classList.toggle('active', b.dataset.screen===name));
   document.getElementById('screens').scrollTop = 0;
   if(name==="compte") renderCompte();
+  if(name==="create") refreshVideoLockUI();
 }
 
 document.getElementById("brandHome").addEventListener("click", ()=>showScreen("home"));
@@ -994,7 +1072,7 @@ function renderTopbar(){
 
 function personById(id){
   if(state.account && state.account.id===id) return state.account;
-  return PEOPLE.find(p=>p.id===id);
+  return REAL_USERS.find(p=>p.id===id);
 }
 
 function canSee(post){
@@ -1002,6 +1080,18 @@ function canSee(post){
   if(!state.account) return false;
   if(post.userId === state.account.id) return true;
   return (state.account.friends || []).includes(post.userId);
+}
+function friendIds(){
+  if(!state.account) return [];
+  return [state.account.id, ...(state.account.friends || [])];
+}
+function feedForTab(){
+  if(state.feedTab === "friends"){
+    if(!state.account) return [];
+    return state.feed.filter(p => friendIds().includes(p.userId) && canSee(p));
+  }
+  // Tendances : toutes les publications publiques du fil, qu'elles viennent d'amis ou non
+  return state.feed.filter(p => p.vis === "public");
 }
 
 function renderMuscleGridHome(){
@@ -1020,15 +1110,21 @@ function renderMuscleGridHome(){
 function renderFeed(){
   const list = document.getElementById('feedList');
   list.innerHTML = '';
-  const posts = state.feed.filter(canSee);
+  const posts = feedForTab();
   document.getElementById('feedCount').textContent = `(${posts.length})`;
   if(!posts.length){
-    list.innerHTML = `<div class="empty-note">Rien à afficher pour l'instant. Connecte-toi pour voir les posts amis, ou publie ta première séance.</div>`;
+    const msg = state.feedTab === "friends" && !state.account
+      ? "Connecte-toi pour voir les publications de tes amis."
+      : "C'est calme ici… sois le premier à poster ta séance !";
+    list.innerHTML = `<div class="empty-feed"><div class="ic">🌱</div><div class="t">${state.feedTab==="friends" ? "Aucune publication d'amis" : "Aucune publication pour l'instant"}</div><div class="d">${msg}</div></div>`;
     return;
   }
   posts.forEach((post,i)=>{
     const p = personById(post.userId) || post;
     const vis = post.vis==="friends" ? `<span class="chip lock">👥 Amis</span>` : `<span class="chip">🌍 Public</span>`;
+    const media = post.video
+      ? `<video class="feed-media" src="${post.video}" controls></video>`
+      : (post.photo ? `<img class="feed-media" alt="" src="${post.photo}">` : "");
     const card = el(`
       <div class="feed-card">
         <div class="feed-head">
@@ -1039,17 +1135,25 @@ function renderFeed(){
           </div>
         </div>
         <div class="feed-title">${post.title}</div>
+        ${media}
         <div class="chip-row">${post.muscles.map(m=>`<span class="chip on">${m}</span>`).join('')}${vis}</div>
         <p style="font-size:12.5px;color:var(--ink-soft);margin:0 0 8px 0;">${post.note||""}</p>
         <div class="feed-stats"><span>❤️ ${post.likes}</span><span>🔖 ${post.saves} enregistrements</span></div>
       </div>`);
     list.appendChild(card);
-    if(i % 2 === 1){
+    if(state.feedTab==="trend" && i % 2 === 1){
       const ad = ADS[Math.floor(i/2) % ADS.length];
       list.appendChild(el(adCardHtml(ad)));
     }
   });
 }
+document.querySelectorAll('#feedTabs .tab').forEach(t=>{
+  t.addEventListener('click', ()=>{
+    state.feedTab = t.dataset.feedtab;
+    document.querySelectorAll('#feedTabs .tab').forEach(x=>x.classList.toggle('on', x===t));
+    renderFeed();
+  });
+});
 
 function renderRating(){
   const avg = state.ratings.reduce((a,b)=>a+b,0)/state.ratings.length;
@@ -1473,8 +1577,7 @@ document.getElementById('publishBtn').addEventListener('click', ()=>{
     alert("Ajoute un titre, au moins un muscle et un exercice avant de publier.");
     return;
   }
-  state.feed.unshift({
-    id:"p"+Date.now(),
+  const basePost = {
     userId: state.account.id,
     user: state.account.name,
     init: state.account.init,
@@ -1484,17 +1587,131 @@ document.getElementById('publishBtn').addEventListener('click', ()=>{
     note: document.getElementById('createNote').value.trim() || "Séance publiée depuis Train Up.",
     vis: createVis,
     exercises:[...state.createExercises]
+  };
+  const wantsVideo = hasActiveProgramV6();
+  const publishBtnEl = document.getElementById('publishBtn');
+
+  function resetCreateForm(){
+    document.getElementById('createTitle').value='';
+    document.getElementById('createNote').value='';
+    state.createMuscles=[]; state.createExercises=[];
+    createPhotoData = null; createVideoData = null;
+    createPhotoFile = null; createVideoFile = null;
+    document.getElementById('createPhotoPreview').innerHTML = '';
+    document.getElementById('createVideoPreview').innerHTML = '';
+    document.getElementById('createPhotoInput').value = '';
+    document.getElementById('createVideoInput').value = '';
+    document.querySelectorAll('.media-btn').forEach(b=>b.classList.remove('filled'));
+    document.querySelectorAll('#createMuscleOptions .opt').forEach(o=>o.classList.remove('sel'));
+    populateExerciseSelect();
+    renderPickedList();
+  }
+
+  if(firebaseReady && db){
+    publishBtnEl.disabled = true;
+    publishBtnEl.textContent = "Publication en cours…";
+    const uploads = [];
+    if(createPhotoFile){
+      const ref = storage.ref().child("posts/" + state.account.id + "/" + Date.now() + "_photo");
+      uploads.push(ref.put(createPhotoFile).then(s=>s.ref.getDownloadURL()).then(url=>{ basePost.photo = url; }));
+    }
+    if(wantsVideo && createVideoFile){
+      const ref = storage.ref().child("posts/" + state.account.id + "/" + Date.now() + "_video");
+      uploads.push(ref.put(createVideoFile).then(s=>s.ref.getDownloadURL()).then(url=>{ basePost.video = url; }));
+    }
+    Promise.all(uploads).then(()=>{
+      basePost.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+      return db.collection('posts').add(basePost);
+    }).then(()=>{
+      resetCreateForm();
+      showScreen('home');
+      // Le fil se met à jour automatiquement grâce à l'écoute Firestore en temps réel.
+    }).catch(err=>{
+      alert("La publication a échoué : " + err.message);
+    }).finally(()=>{
+      publishBtnEl.disabled = false;
+      publishBtnEl.textContent = "Publier dans le fil";
+    });
+    return;
+  }
+
+  // ----- Repli local (Firebase non configuré) : visible uniquement sur cet appareil -----
+  state.feed.unshift({
+    id:"p"+Date.now(),
+    ...basePost,
+    photo: createPhotoData,
+    video: wantsVideo ? createVideoData : null
   });
-  document.getElementById('createTitle').value='';
-  document.getElementById('createNote').value='';
-  state.createMuscles=[]; state.createExercises=[];
-  document.querySelectorAll('#createMuscleOptions .opt').forEach(o=>o.classList.remove('sel'));
-  populateExerciseSelect();
-  renderPickedList();
+  resetCreateForm();
   renderFeed();
   saveState();
   showScreen('home');
 });
+
+/* ===================== MÉDIAS DE PUBLICATION (photo / vidéo) ===================== */
+let createPhotoData = null;
+let createVideoData = null;
+let createPhotoFile = null;
+let createVideoFile = null;
+function hasActiveProgramV6(){
+  try{
+    const raw = localStorage.getItem('trainup-program-v6');
+    if(raw){
+      const d = JSON.parse(raw);
+      if(d && PROGRAMS_V6[d.key]) return true;
+    }
+  }catch(e){}
+  try{
+    const trials = getTrialDataV6();
+    const now = Date.now();
+    return Object.keys(trials).some(k => PROGRAMS_V6[k] && trials[k].expiresAt > now);
+  }catch(e){ return false; }
+}
+function refreshVideoLockUI(){
+  const unlocked = hasActiveProgramV6();
+  const badge = document.getElementById('videoLockBadge');
+  const hint = document.getElementById('videoLockHint');
+  const btn = document.getElementById('createVideoBtn');
+  if(badge) badge.textContent = unlocked ? '' : '🔒';
+  if(hint) hint.style.display = unlocked ? 'none' : 'block';
+  if(btn) btn.classList.toggle('locked', !unlocked);
+}
+document.getElementById('createPhotoBtn').addEventListener('click', ()=>{
+  document.getElementById('createPhotoInput').click();
+});
+document.getElementById('createPhotoInput').addEventListener('change', e=>{
+  const file = e.target.files && e.target.files[0];
+  if(!file) return;
+  createPhotoFile = file;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    createPhotoData = reader.result;
+    document.getElementById('createPhotoPreview').innerHTML = `<img class="feed-media" alt="" src="${createPhotoData}">`;
+    document.getElementById('createPhotoBtn').classList.add('filled');
+  };
+  reader.readAsDataURL(file);
+});
+document.getElementById('createVideoBtn').addEventListener('click', ()=>{
+  if(!hasActiveProgramV6()){
+    alert("L'ajout de vidéo est réservé aux abonnés à un programme Train Up (formule payante ou essai gratuit de 7 jours). Rends-toi dans l'onglet Programmes.");
+    return;
+  }
+  document.getElementById('createVideoInput').click();
+});
+document.getElementById('createVideoInput').addEventListener('change', e=>{
+  const file = e.target.files && e.target.files[0];
+  if(!file) return;
+  createVideoFile = file;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    createVideoData = reader.result;
+    document.getElementById('createVideoPreview').innerHTML = `<video class="feed-media" src="${createVideoData}" controls></video>`;
+    document.getElementById('createVideoBtn').classList.add('filled');
+  };
+  reader.readAsDataURL(file);
+});
+const goProgramsLink = document.getElementById('goProgramsLink');
+if(goProgramsLink) goProgramsLink.addEventListener('click', ()=>showScreen('programmes'));
 
 /* ===================== SALLE / GOOGLE MAPS ===================== */
 let userLocation = null;
@@ -1641,7 +1858,7 @@ function renderCompte(){
       <input type="email" id="accEmail" placeholder="toi@email.com">
       <div class="field-label">Mot de passe</div>
       <input type="password" id="accPass" placeholder="••••••••">
-      <p class="hint">Démo locale : rien n'est envoyé sur un serveur, tout reste dans ton navigateur.</p>
+      <p class="hint">${firebaseReady ? "Ton compte, tes amis et tes publications sont synchronisés automatiquement sur tous tes appareils." : "Mode local : Firebase n'est pas encore configuré, donc rien n'est partagé entre appareils pour l'instant (voir le tuto fourni)."}</p>
       <button class="btn btn-primary" id="accSubmit" style="margin-top:14px;">${signup?"Créer mon compte":"Se connecter"}</button>
       <div class="auth-switch">${signup?'Déjà un compte ? <b id="toLogin">Connexion</b>':'Nouveau ici ? <b id="toSignup">Créer un compte</b>'}</div>
     `;
@@ -1697,14 +1914,19 @@ function renderCompte(){
         <p style="font-size:12.5px;color:var(--ink-soft);margin:0;">${p.note||""}</p>
       </div>`).join("");
   } else {
-    body.innerHTML = PEOPLE.map(p=>{
-      const isF = friends.includes(p.id);
-      return `<div class="people-item">
-        ${avatarHtml(p,36)}
-        <div style="flex:1"><div class="feed-user">${p.name}</div><div class="feed-time">${p.handle}</div></div>
-        <button class="btn btn-sm ${isF?'btn-ghost':'btn-primary'}" data-fid="${p.id}">${isF?"Ami ✓":"Ajouter"}</button>
-      </div>`;
-    }).join("") + `<p class="hint">Les posts marqués « Amis » n'apparaissent dans le fil que si vous êtes amis.</p>`;
+    const others = REAL_USERS.filter(p=>p.id!==state.account.id);
+    if(!others.length){
+      body.innerHTML = `<div class="empty-note">Personne d'autre n'a encore rejoint Train Up${firebaseReady?"":" sur cet appareil"}. Invite tes amis à créer un compte pour pouvoir les ajouter ici !</div>`;
+    } else {
+      body.innerHTML = others.map(p=>{
+        const isF = friends.includes(p.id);
+        return `<div class="people-item">
+          ${avatarHtml(p,36)}
+          <div style="flex:1"><div class="feed-user">${p.name}</div><div class="feed-time">${p.handle}</div></div>
+          <button class="btn btn-sm ${isF?'btn-ghost':'btn-primary'}" data-fid="${p.id}">${isF?"Ami ✓":"Ajouter"}</button>
+        </div>`;
+      }).join("") + `<p class="hint">Les posts marqués « Amis » n'apparaissent dans le fil que si vous êtes amis.</p>`;
+    }
   }
   document.getElementById("editPhoto").addEventListener("click", ()=>document.getElementById("photoInput").click());
   document.getElementById("saveBio").addEventListener("click", ()=>{
@@ -1719,11 +1941,22 @@ function renderCompte(){
       const id = btn.dataset.fid;
       const arr = state.account.friends;
       const i = arr.indexOf(id);
+      const adding = i === -1;
       if(i>-1) arr.splice(i,1); else arr.push(id);
+      if(firebaseReady && db && state.account && state.account.id){
+        db.collection("users").doc(state.account.id).update({
+          friends: adding
+            ? firebase.firestore.FieldValue.arrayUnion(id)
+            : firebase.firestore.FieldValue.arrayRemove(id)
+        }).catch(err=>console.error("Erreur mise à jour amis :", err));
+      }
       saveState(); renderCompte(); renderFeed();
     });
   });
   document.getElementById("logoutBtn").addEventListener("click", ()=>{
+    if(firebaseReady && auth){
+      auth.signOut().catch(err=>console.error("Erreur déconnexion :", err));
+    }
     state.account = null; saveState(); renderTopbar(); renderFeed(); renderCompte();
   });
 }
@@ -1735,6 +1968,36 @@ function submitAuth(){
     alert("Indique un e-mail et un mot de passe d'au moins 4 caractères.");
     return;
   }
+  const btn = document.getElementById("accSubmit");
+
+  if(firebaseReady){
+    btn.disabled = true;
+    if(state.authMode==="signup"){
+      const name = (document.getElementById("accName").value||"").trim();
+      if(name.length<2){ alert("Ajoute ton nom."); btn.disabled=false; return; }
+      auth.createUserWithEmailAndPassword(email, pass).then(cred=>{
+        const profile = {
+          name, email,
+          init: initials(name),
+          handle: "@"+name.toLowerCase().replace(/[^a-z0-9]+/g,"").slice(0,16),
+          photo: null,
+          bio: "",
+          friends: []
+        };
+        return db.collection("users").doc(cred.user.uid).set(profile);
+        // state.account sera rempli automatiquement par onAuthStateChanged
+      }).catch(err=>{
+        alert("Impossible de créer le compte : " + err.message);
+      }).finally(()=>{ btn.disabled=false; });
+    } else {
+      auth.signInWithEmailAndPassword(email, pass).catch(err=>{
+        alert("E-mail ou mot de passe incorrect.");
+      }).finally(()=>{ btn.disabled=false; });
+    }
+    return;
+  }
+
+  // ----- Repli local (Firebase non configuré) : fonctionne uniquement sur cet appareil -----
   const users = JSON.parse(localStorage.getItem("trainup-users")||"[]");
   if(state.authMode==="signup"){
     const name = (document.getElementById("accName").value||"").trim();
@@ -1747,7 +2010,7 @@ function submitAuth(){
       handle: "@"+name.toLowerCase().replace(/[^a-z0-9]+/g,"").slice(0,16),
       photo: null,
       bio: "",
-      friends: ["lea"]
+      friends: []
     };
     users.push(acc);
     localStorage.setItem("trainup-users", JSON.stringify(users));
@@ -1766,6 +2029,18 @@ function submitAuth(){
 document.getElementById("photoInput").addEventListener("change", e=>{
   const file = e.target.files && e.target.files[0];
   if(!file || !state.account) return;
+
+  if(firebaseReady && storage && db){
+    const ref = storage.ref().child("avatars/" + state.account.id + "_" + Date.now());
+    ref.put(file).then(snap=>snap.ref.getDownloadURL()).then(url=>{
+      return db.collection("users").doc(state.account.id).update({photo: url});
+      // state.account sera mis à jour automatiquement via l'écoute Firestore
+    }).catch(err=>{
+      alert("Échec de l'envoi de la photo : " + err.message);
+    });
+    return;
+  }
+
   const reader = new FileReader();
   reader.onload = ()=>{
     state.account.photo = reader.result;
@@ -1875,7 +2150,64 @@ document.getElementById('programModal').addEventListener('click',e=>{if(e.target
 ['planLevel','planGoal','planDays','planLoad'].forEach(id=>document.getElementById(id).addEventListener('input',renderPlanPreviewV6));
 document.getElementById('activatePlan').addEventListener('click',()=>{const p=PROGRAMS_V6[selectedProgramV6];const billing=p.annual?document.getElementById('planBilling').value:'monthly';localStorage.setItem('trainup-program-v6',JSON.stringify({key:selectedProgramV6,billing,createdAt:Date.now()}));document.getElementById('programModal').classList.remove('open');renderProgramStatusV6();showScreen('programmes');});
 
+/* ===================== SYNCHRONISATION TEMPS RÉEL (Firebase) =====================
+   Tant que firebaseConfig n'est pas renseignée, ces fonctions ne font rien et
+   l'application continue de fonctionner en mode local comme avant. */
+let unsubscribePosts = null;
+let unsubscribeOwnProfile = null;
+
+function subscribeToPosts(){
+  if(!firebaseReady || !db) return;
+  if(unsubscribePosts) unsubscribePosts();
+  unsubscribePosts = db.collection('posts').orderBy('createdAt','desc').limit(200)
+    .onSnapshot(snap=>{
+      state.feed = snap.docs.map(d=>({id:d.id, ...d.data()}));
+      renderFeed();
+      if(state.screen==="compte") renderCompte();
+    }, err=>console.error("Erreur de synchronisation du fil :", err));
+}
+
+function subscribeToUsers(){
+  if(!firebaseReady || !db) return;
+  db.collection('users').onSnapshot(snap=>{
+    REAL_USERS = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    if(state.screen==="compte") renderCompte();
+  }, err=>console.error("Erreur de synchronisation des membres :", err));
+}
+
+function subscribeToOwnProfile(uid, fallbackEmail){
+  if(!firebaseReady || !db) return;
+  if(unsubscribeOwnProfile) unsubscribeOwnProfile();
+  unsubscribeOwnProfile = db.collection('users').doc(uid).onSnapshot(doc=>{
+    if(!doc.exists) return;
+    state.account = {id: uid, email: fallbackEmail, ...doc.data()};
+    renderTopbar(); renderCompte(); renderFeed();
+  }, err=>console.error("Erreur de synchronisation du profil :", err));
+}
+
+if(firebaseReady){
+  subscribeToPosts();
+  subscribeToUsers();
+  auth.onAuthStateChanged(user=>{
+    if(user){
+      subscribeToOwnProfile(user.uid, user.email);
+    } else {
+      if(unsubscribeOwnProfile){ unsubscribeOwnProfile(); unsubscribeOwnProfile=null; }
+      state.account = null;
+      renderTopbar(); renderCompte(); renderFeed();
+    }
+  });
+}
+
 /* ===================== INIT ===================== */
+function renderSyncBanner(){
+  const el2 = document.getElementById('syncBanner');
+  if(!el2) return;
+  el2.innerHTML = firebaseReady
+    ? `<div class="sync-banner on">🔄 Synchronisé entre tes appareils</div>`
+    : `<div class="sync-banner off">🔌 Mode local — active Firebase pour synchroniser le fil (voir le tuto fourni)</div>`;
+}
+renderSyncBanner();
 loadState();
 renderTopbar();
 renderMuscleGridHome();
